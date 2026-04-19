@@ -74,6 +74,7 @@ init();
 
 function init() {
   bindEvents();
+  restoreViewState();
   applyFilters();
   renderStats();
   renderCard();
@@ -182,6 +183,12 @@ function loadProgress() {
     stored.todayDone = stored.todayDone || 0;
     stored.streak = stored.streak || 0;
     stored.lastStudyDate = stored.lastStudyDate || "";
+    stored.lastWordId = stored.lastWordId || null;
+    stored.lastFilter = stored.lastFilter || "all";
+    stored.lastRank = stored.lastRank || "all";
+    stored.lastReviewMode = stored.lastReviewMode || "normal";
+    stored.lastQuery = stored.lastQuery || "";
+    stored.lastPanel = stored.lastPanel || "study";
     if (stored[DAILY_DATE_KEY] !== today) {
       stored.todayDone = 0;
       stored[DAILY_DATE_KEY] = today;
@@ -195,6 +202,12 @@ function loadProgress() {
       todayDone: 0,
       streak: 0,
       lastStudyDate: "",
+      lastWordId: null,
+      lastFilter: "all",
+      lastRank: "all",
+      lastReviewMode: "normal",
+      lastQuery: "",
+      lastPanel: "study",
       [DAILY_DATE_KEY]: new Date().toISOString().slice(0, 10),
     };
   }
@@ -202,6 +215,36 @@ function loadProgress() {
 
 function saveProgress() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.progress));
+}
+
+function persistViewState() {
+  const currentWord = getCurrentWord();
+  if (currentWord) {
+    state.progress.lastWordId = currentWord.id;
+  }
+  state.progress.lastFilter = state.currentFilter;
+  state.progress.lastRank = state.currentRank;
+  state.progress.lastReviewMode = state.reviewMode;
+  state.progress.lastQuery = state.query;
+  state.progress.lastPanel =
+    els.panels.find((panel) => panel.classList.contains("active"))?.dataset.panel || "study";
+  saveProgress();
+}
+
+function restoreViewState() {
+  state.currentFilter = state.progress.lastFilter || "all";
+  state.currentRank = state.progress.lastRank || "all";
+  state.reviewMode = state.progress.lastReviewMode || "normal";
+  state.query = state.progress.lastQuery || "";
+  els.searchInput.value = state.query;
+
+  [...els.filterChips.querySelectorAll(".chip")].forEach((chip) => {
+    chip.classList.toggle("active", chip.dataset.filter === state.currentFilter);
+  });
+  [...els.rankChips.querySelectorAll(".chip")].forEach((chip) => {
+    chip.classList.toggle("active", chip.dataset.rank === state.currentRank);
+  });
+  switchPanel(state.progress.lastPanel || "study");
 }
 
 function getStatus(id) {
@@ -234,7 +277,15 @@ function applyFilters() {
   state.filteredWords =
     state.reviewMode === "mistakes" ? sortWordsForMistakeMode(filtered) : filtered;
 
-  if (state.currentIndex >= state.filteredWords.length) {
+  const savedWordId = state.progress.lastWordId;
+  if (savedWordId) {
+    const savedIndex = state.filteredWords.findIndex((word) => word.id === savedWordId);
+    if (savedIndex >= 0) {
+      state.currentIndex = savedIndex;
+    } else if (state.currentIndex >= state.filteredWords.length) {
+      state.currentIndex = 0;
+    }
+  } else if (state.currentIndex >= state.filteredWords.length) {
     state.currentIndex = 0;
   }
 
@@ -282,6 +333,9 @@ function renderCard() {
     els.favoriteBtn.textContent = "☆";
     return;
   }
+
+  state.progress.lastWordId = word.id;
+  persistViewState();
 
   const favorite = state.progress.favorites.includes(word.id);
   els.studyOrder.textContent = `#${word.id}`;
@@ -504,6 +558,8 @@ function switchPanel(name) {
   els.panels.forEach((panel) =>
     panel.classList.toggle("active", panel.dataset.panel === name)
   );
+  state.progress.lastPanel = name;
+  saveProgress();
 }
 
 function toggleMistakeMode() {
@@ -512,6 +568,7 @@ function toggleMistakeMode() {
   resetCardFace();
   applyFilters();
   buildQuiz();
+  persistViewState();
 }
 
 function sortWordsForMistakeMode(entries) {
@@ -612,11 +669,17 @@ function resetProgress() {
   localStorage.removeItem(STORAGE_KEY);
   state.progress = loadProgress();
   state.currentFilter = "all";
+  state.currentRank = "all";
+  state.reviewMode = "normal";
   state.query = "";
   els.searchInput.value = "";
   [...els.filterChips.querySelectorAll(".chip")].forEach((chip) => {
     chip.classList.toggle("active", chip.dataset.filter === "all");
   });
+  [...els.rankChips.querySelectorAll(".chip")].forEach((chip) => {
+    chip.classList.toggle("active", chip.dataset.rank === "all");
+  });
+  switchPanel("study");
   applyFilters();
   renderReviewLists();
   buildQuiz();
