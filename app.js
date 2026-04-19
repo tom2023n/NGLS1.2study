@@ -92,6 +92,7 @@ function bindEvents() {
   els.rankChips.addEventListener("click", (event) => {
     const button = event.target.closest("[data-rank]");
     if (!button) return;
+    persistViewState();
     state.currentRank = button.dataset.rank;
     [...els.rankChips.querySelectorAll(".chip")].forEach((chip) => {
       chip.classList.toggle("active", chip === button);
@@ -102,6 +103,7 @@ function bindEvents() {
   els.filterChips.addEventListener("click", (event) => {
     const button = event.target.closest("[data-filter]");
     if (!button) return;
+    persistViewState();
     state.currentFilter = button.dataset.filter;
     [...els.filterChips.querySelectorAll(".chip")].forEach((chip) => {
       chip.classList.toggle("active", chip === button);
@@ -189,6 +191,7 @@ function loadProgress() {
     stored.lastReviewMode = stored.lastReviewMode || "normal";
     stored.lastQuery = stored.lastQuery || "";
     stored.lastPanel = stored.lastPanel || "study";
+    stored.viewPositions = stored.viewPositions || {};
     if (stored[DAILY_DATE_KEY] !== today) {
       stored.todayDone = 0;
       stored[DAILY_DATE_KEY] = today;
@@ -208,6 +211,7 @@ function loadProgress() {
       lastReviewMode: "normal",
       lastQuery: "",
       lastPanel: "study",
+      viewPositions: {},
       [DAILY_DATE_KEY]: new Date().toISOString().slice(0, 10),
     };
   }
@@ -217,10 +221,20 @@ function saveProgress() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.progress));
 }
 
+function getViewKey() {
+  return [
+    state.currentFilter,
+    state.currentRank,
+    state.reviewMode,
+    state.query || ""
+  ].join("|");
+}
+
 function persistViewState() {
   const currentWord = getCurrentWord();
   if (currentWord) {
     state.progress.lastWordId = currentWord.id;
+    state.progress.viewPositions[getViewKey()] = currentWord.id;
   }
   state.progress.lastFilter = state.currentFilter;
   state.progress.lastRank = state.currentRank;
@@ -277,12 +291,12 @@ function applyFilters() {
   state.filteredWords =
     state.reviewMode === "mistakes" ? sortWordsForMistakeMode(filtered) : filtered;
 
-  const savedWordId = state.progress.lastWordId;
+  const savedWordId = state.progress.viewPositions[getViewKey()] || state.progress.lastWordId;
   if (savedWordId) {
     const savedIndex = state.filteredWords.findIndex((word) => word.id === savedWordId);
     if (savedIndex >= 0) {
       state.currentIndex = savedIndex;
-    } else if (state.currentIndex >= state.filteredWords.length) {
+    } else {
       state.currentIndex = 0;
     }
   } else if (state.currentIndex >= state.filteredWords.length) {
