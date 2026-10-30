@@ -186,7 +186,7 @@ export function emptyProgress(now = Date.now()) {
     lastPanel: "study",
     viewPositions: {},
     days: {},
-    settings: { accent: "us", dailyNew: 10 },
+    settings: { accent: "us", dailyNew: 10, theme: "system", sound: true },
     todayDone: 0,
     [DAILY_DATE_KEY]: localDate(new Date(now)),
   };
@@ -262,7 +262,9 @@ function sanitizeDays(days) {
 function sanitizeSettings(settings) {
   const accent = settings?.accent === "uk" ? "uk" : "us";
   const dailyNew = finite(settings?.dailyNew, 0, 100) ? Math.round(settings.dailyNew) : 10;
-  return { accent, dailyNew };
+  const theme = settings?.theme === "light" || settings?.theme === "dark" ? settings.theme : "system";
+  const sound = typeof settings?.sound === "boolean" ? settings.sound : true;
+  return { accent, dailyNew, theme, sound };
 }
 
 /**

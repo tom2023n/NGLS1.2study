@@ -17,18 +17,23 @@ import {
   touchDay,
 } from "./logic.js";
 
-const HUES = ["#e7c2b3", "#d7e0cc", "#f0ddb0", "#c9d7e4", "#e3d0dc", "#d5e4df"];
-const rawWords = Array.isArray(window.NGSL_WORDS) ? window.NGSL_WORDS : [];
-const words = rawWords.map((entry) => ({
-  ...entry,
-  chinese: sanitizeText(entry.chinese),
-  exampleChinese: sanitizeText(entry.exampleChinese),
-  definition: sanitizeText(entry.definition),
-  example: sanitizeText(entry.example),
-  partOfSpeech: sanitizeText(entry.partOfSpeech),
-  pronunciation: sanitizeText(entry.pronunciation),
-}));
-const byId = new Map(words.map((word) => [word.id, word]));
+const HUES = ["#c4573a", "#5f7a52", "#a07818", "#3f6584", "#8d4f72", "#3e6f68"];
+let words = [];
+let byId = new Map();
+
+function prepareWords() {
+  const rawWords = Array.isArray(window.NGSL_WORDS) ? window.NGSL_WORDS : [];
+  words = rawWords.map((entry) => ({
+    ...entry,
+    chinese: sanitizeText(entry.chinese),
+    exampleChinese: sanitizeText(entry.exampleChinese),
+    definition: sanitizeText(entry.definition),
+    example: sanitizeText(entry.example),
+    partOfSpeech: sanitizeText(entry.partOfSpeech),
+    pronunciation: sanitizeText(entry.pronunciation),
+  }));
+  byId = new Map(words.map((word) => [word.id, word]));
+}
 
 const state = {
   mode: "today",
@@ -38,6 +43,7 @@ const state = {
   rank: "all",
   query: "",
   quiz: null,
+  grading: false,
   progress: loadProgress(),
   deferredPrompt: null,
 };
@@ -51,6 +57,11 @@ const els = {
   filterRoot: $("filterRoot"),
   rail: $("rail"),
   installBtn: $("installBtn"),
+  themeBtn: $("themeBtn"),
+  soundBtn: $("soundBtn"),
+  themeChoices: $("themeChoices"),
+  soundToggle: $("soundToggle"),
+  pagerRow: $("pagerRow"),
   iosHint: $("iosHint"),
   iosHintClose: $("iosHintClose"),
   queueLabel: $("queueLabel"),
@@ -70,11 +81,8 @@ const els = {
   flipBackBtn: $("flipBackBtn"),
   frontIllo: $("frontIllo"),
   frontImg: $("frontImg"),
-  frontPlate: $("frontPlate"),
-  frontInitial: $("frontInitial"),
   backIllo: $("backIllo"),
   backImg: $("backImg"),
-  backInitial: $("backInitial"),
   studyOrder: $("studyOrder"),
   studyWord: $("studyWord"),
   studyHint: $("studyHint"),
@@ -126,12 +134,26 @@ const els = {
 
 let currentAudio = null;
 
-init();
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(src));
+    document.body.appendChild(script);
+  });
+}
+
+Promise.all([loadScript("./words.js"), loadScript("./atlas-map.js")])
+  .then(() => init())
+  .catch((error) => console.error(error));
 
 function init() {
+  prepareWords();
   restoreView();
   placeFilters();
   bindEvents();
+  applyTheme();
   rebuildQueue(true);
   render();
   buildQuiz();
@@ -230,6 +252,15 @@ function bindEvents() {
     localStorage.setItem("ngsl-ios-hint-dismissed", "1");
     els.iosHint.classList.add("hidden");
   });
+  els.themeBtn.addEventListener("click", () => setTheme(nextTheme(state.progress.settings.theme)));
+  els.themeChoices.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-theme]");
+    if (!button) return;
+    setTheme(button.dataset.theme);
+  });
+  els.soundBtn.addEventListener("click", () => setSound(!state.progress.settings.sound));
+  els.soundToggle.addEventListener("change", () => setSound(els.soundToggle.checked));
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
   window.matchMedia("(min-width: 1000px)").addEventListener("change", placeFilters);
   document.addEventListener("keydown", onKeydown);
   if ("speechSynthesis" in window) {
@@ -392,6 +423,7 @@ function flip() {
   if (!currentWord()) return;
   els.wordCard.classList.toggle("is-flipped");
   els.flipBtn.setAttribute("aria-pressed", String(els.wordCard.classList.contains("is-flipped")));
+  cueFlip();
 }
 
 function resetFace() {
@@ -403,7 +435,8 @@ function resetFace() {
 
 function grade(rating) {
   const word = currentWord();
-  if (!word || activePanel() !== "study") return;
+  if (!word || activePanel() !== "study" || state.grading) return;
+  state.grading = true;
   const now = Date.now();
   const prev = cardOf(word.id);
   const next = review(prev, rating, now, 0.9, true);
@@ -414,22 +447,26 @@ function grade(rating) {
     c: rating === Rating.Again ? 0 : 1,
   });
   rememberRecent(word.id);
-  if (state.mode === "today") {
-    state.queue = state.queue.filter((item) => item.id !== word.id);
-    if (next.due - now < 20 * 60 * 1000) {
-      const at = Math.min(state.queue.length, state.index + 2);
-      state.queue.splice(at, 0, word);
+  els.wordCard.classList.add(rating === Rating.Again ? "is-again" : "is-good");
+  cueGrade(rating);
+  const wait = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 40 : 360;
+  window.setTimeout(() => {
+    els.wordCard.classList.remove("is-again", "is-good");
+    if (state.mode === "today") {
+      state.queue = state.queue.filter((item) => item.id !== word.id);
+      if (next.due - now < 20 * 60 * 1000) {
+        const at = Math.min(state.queue.length, state.index + 2);
+        state.queue.splice(at, 0, word);
+      }
+      if (state.index >= state.queue.length) state.index = 0;
+    } else if (state.queue.length) {
+      state.index = (state.index + 1) % state.queue.length;
     }
-    if (state.index >= state.queue.length) state.index = 0;
-  } else {
-    step(1);
+    resetFace();
+    state.grading = false;
     save();
-    renderMe();
-    return;
-  }
-  resetFace();
-  save();
-  render();
+    render();
+  }, wait);
 }
 
 function toggleFavorite(id) {
@@ -451,6 +488,90 @@ function render() {
   renderCard();
   renderMe();
   syncAccent();
+  syncSound();
+}
+
+function themeLabel(choice) {
+  if (choice === "light") return "浅色";
+  if (choice === "dark") return "深色";
+  return "自动";
+}
+
+function nextTheme(current) {
+  const order = ["system", "light", "dark"];
+  return order[(Math.max(0, order.indexOf(current)) + 1) % order.length];
+}
+
+function setTheme(theme) {
+  state.progress.settings.theme = theme === "light" || theme === "dark" ? theme : "system";
+  save();
+  applyTheme();
+}
+
+function applyTheme() {
+  const choice = state.progress.settings.theme || "system";
+  const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const dark = choice === "dark" || (choice === "system" && systemDark);
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", dark ? "#0d1120" : "#f6f1e7");
+  if (els.themeBtn) {
+    els.themeBtn.textContent = themeLabel(choice);
+    els.themeBtn.setAttribute("aria-label", `${themeLabel(choice)}，切换主题`);
+  }
+  if (els.themeChoices) {
+    [...els.themeChoices.querySelectorAll("button")].forEach((button) => {
+      button.classList.toggle("is-on", button.dataset.theme === choice);
+    });
+  }
+}
+
+function setSound(on) {
+  state.progress.settings.sound = Boolean(on);
+  save();
+  syncSound();
+}
+
+function syncSound() {
+  const on = state.progress.settings.sound !== false;
+  if (els.soundToggle) els.soundToggle.checked = on;
+  if (!els.soundBtn) return;
+  els.soundBtn.setAttribute("aria-pressed", String(on));
+  els.soundBtn.setAttribute("aria-label", on ? "关闭音效" : "打开音效");
+  els.soundBtn.classList.toggle("is-off", !on);
+}
+
+let audioCtx;
+function tone(freq, when, duration, level, type = "sine") {
+  if (state.progress.settings.sound === false) return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  if (!audioCtx) audioCtx = new Ctx();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  const start = audioCtx.currentTime + when;
+  gain.gain.setValueAtTime(level, start);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(start);
+  osc.stop(start + duration);
+}
+
+function cueGrade(rating) {
+  if (rating === Rating.Again) {
+    tone(196, 0, 0.16, 0.035, "triangle");
+    return;
+  }
+  tone(523, 0, 0.11, 0.04);
+  tone(784, 0.09, 0.16, 0.03);
+}
+
+function cueFlip() {
+  tone(660, 0, 0.04, 0.018);
 }
 
 function syncAccent() {
@@ -500,11 +621,15 @@ function atlasOf(word) {
   return { id: row[0], uk: row[1] || "", us: row[2] || "", flags: row[3] || 0 };
 }
 
-function paintIllo(figure, img, initialEl, word, eager) {
+function paintIllo(figure, img, word, eager) {
   const atlas = atlasOf(word);
   const hue = HUES[Math.abs(hash(word.word)) % HUES.length];
   figure.style.setProperty("--hue", hue);
-  initialEl.textContent = word.word.slice(0, 1).toUpperCase();
+  figure.style.setProperty("--len", String(Math.max(3, word.word.length)));
+  const initial = figure.querySelector(".plate-initial");
+  const label = figure.querySelector(".plate-word");
+  if (initial) initial.textContent = word.word.slice(0, 1).toUpperCase();
+  if (label) label.textContent = word.word;
   const showImage = !!(atlas && atlas.flags & 1);
   figure.classList.remove("is-loaded");
   if (!showImage) {
@@ -532,6 +657,7 @@ function renderCard() {
   els.studyEmpty.classList.toggle("hidden", !empty);
   els.cardFrame.classList.toggle("hidden", empty);
   els.gradeRow.classList.toggle("hidden", empty);
+  els.pagerRow.classList.toggle("hidden", empty);
   if (!word) {
     const today = dayStat(state.progress);
     els.emptyCopy.textContent = `今天已评分 ${today.r || 0} 次，新认识 ${today.n || 0} 个词。到期的都会再出现。`;
@@ -544,7 +670,7 @@ function renderCard() {
   els.studyWord.textContent = word.word;
   els.studyWordBack.textContent = word.word;
   els.studyHint.textContent = "轻点查看释义和例句";
-  els.flipBtn.setAttribute("aria-label", `查看 ${word.word} 的释义`);
+  els.flipBtn.removeAttribute("aria-label");
   els.studyPos.textContent = word.partOfSpeech || "word";
   els.studyChinese.textContent = displayChinese(word.chinese);
   els.studyDefinition.textContent = word.definition || "暂无英文释义。";
@@ -555,8 +681,19 @@ function renderCard() {
   els.favoriteBtn.classList.toggle("is-on", favorite);
   els.favoriteBtn.setAttribute("aria-pressed", String(favorite));
   els.favoriteBtn.setAttribute("aria-label", favorite ? "取消收藏" : "收藏单词");
-  paintIllo(els.frontIllo, els.frontImg, els.frontInitial, word, true);
-  paintIllo(els.backIllo, els.backImg, els.backInitial, word, false);
+  const wordKey = String(word.id);
+  if (!els.cardFrame.dataset.word) {
+    els.cardFrame.dataset.word = wordKey;
+  } else if (els.cardFrame.dataset.word !== wordKey) {
+    els.cardFrame.dataset.word = wordKey;
+    els.cardFrame.classList.remove("is-entering");
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      void els.cardFrame.offsetWidth;
+      els.cardFrame.classList.add("is-entering");
+    }
+  }
+  paintIllo(els.frontIllo, els.frontImg, word, true);
+  paintIllo(els.backIllo, els.backImg, word, false);
   renderIpa(word, atlas);
   const card = cardOf(word.id);
   const intervals = preview(card, Date.now(), 0.9, false);
@@ -749,6 +886,7 @@ function answerQuiz(button, choice, answer) {
     ? `答对了：${answer.word}。下次大约 ${when}后。`
     : `正确答案是 ${answer.word}。下次大约 ${when}后再见。`;
   els.newQuizBtn.textContent = "下一题";
+  cueGrade(correct ? Rating.Good : Rating.Again);
   save();
   renderStats();
   renderMe();

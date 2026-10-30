@@ -8,7 +8,18 @@
       name="description"
       content="用闪卡、测验和 FSRS 间隔复习学习 NGSL 1.2 的 2809 个核心英语词。带插画和英美发音，进度只保存在本机。"
     />
-    <meta name="theme-color" content="#0d1120" />
+    <meta name="theme-color" content="#f6f1e7" />
+    <script>
+      try {
+        var saved = JSON.parse(localStorage.getItem("ngsl-study-progress-v1") || "null");
+        var choice = saved && saved.settings && saved.settings.theme;
+        var dark =
+          choice === "dark" ||
+          (choice !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        document.querySelector('meta[name="theme-color"]').content = dark ? "#0d1120" : "#f6f1e7";
+      } catch (error) {}
+    </script>
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -28,11 +39,10 @@
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
     <link rel="manifest" href="./manifest.json" />
     <style>
-      html, body { margin: 0; background: #0d1120; color: #f2ebdd; }
+      html, body { margin: 0; background: #f6f1e7; color: #1a2035; }
+      html[data-theme="dark"], html[data-theme="dark"] body { background: #0d1120; color: #f2ebdd; }
     </style>
-    <link rel="preload" href="./styles.css" as="style" />
-    <link rel="stylesheet" href="./styles.css" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="./styles.css" /></noscript>
+    <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="app">
@@ -46,6 +56,8 @@
             <button type="button" data-accent="uk">英</button>
             <button type="button" data-accent="us" class="is-on">美</button>
           </div>
+          <button id="themeBtn" class="ghost-btn" type="button" aria-label="主题：跟随系统">自动</button>
+          <button id="soundBtn" class="icon-btn" type="button" aria-pressed="true" aria-label="关闭音效">♪</button>
           <button id="filterBtn" class="ghost-btn" type="button">筛选</button>
           <button id="installBtn" class="ghost-btn hidden" type="button">安装</button>
         </div>
@@ -86,8 +98,9 @@
 
             <div class="card-stage">
               <div id="studyEmpty" class="empty-card hidden">
+                <div class="empty-mark" aria-hidden="true"><span></span></div>
                 <p class="eyebrow">今日完成</p>
-                <h2>这一程先到这里。</h2>
+                <h2>今天的词，先到这里。</h2>
                 <p id="emptyCopy">到期的词都复习过了。想再认识几个新词，或去词库里随便翻。</p>
                 <div class="empty-actions">
                   <button id="moreBtn" class="primary-btn" type="button">再学 5 个新词</button>
@@ -97,12 +110,15 @@
 
               <div class="card-frame" id="cardFrame">
                 <article class="word-card" id="wordCard">
+                  <div class="card-inner">
                   <div class="card-face card-front">
                     <button type="button" class="front-btn" id="flipBtn">
                       <figure class="illo" id="frontIllo">
                         <img id="frontImg" alt="" decoding="async" />
-                        <div class="plate" id="frontPlate" aria-hidden="true">
-                          <b id="frontInitial">A</b>
+                        <div class="plate" aria-hidden="true">
+                          <b class="plate-initial">T</b>
+                          <span class="plate-word">the</span>
+                          <i class="plate-rule"></i>
                         </div>
                       </figure>
                       <p class="card-kicker" id="studyOrder">#1 · 未学</p>
@@ -115,7 +131,11 @@
                     <header class="back-head">
                       <figure class="illo illo-sm" id="backIllo">
                         <img id="backImg" alt="" decoding="async" />
-                        <div class="plate" aria-hidden="true"><b id="backInitial">A</b></div>
+                        <div class="plate" aria-hidden="true">
+                          <b class="plate-initial">T</b>
+                          <span class="plate-word">the</span>
+                          <i class="plate-rule"></i>
+                        </div>
                       </figure>
                       <div class="back-title">
                         <p class="card-kicker" id="studyPos">det</p>
@@ -137,6 +157,7 @@
                       </div>
                     </div>
                   </div>
+                  </div>
                 </article>
               </div>
             </div>
@@ -153,7 +174,7 @@
                 <kbd>2</kbd>
               </button>
             </div>
-            <div class="pager">
+            <div class="pager" id="pagerRow">
               <button id="prevBtn" class="ghost-btn" type="button">上一个 <kbd>←</kbd></button>
               <button id="speakBtn" class="ghost-btn" type="button">朗读</button>
               <button id="nextBtn" class="ghost-btn" type="button">下一个 <kbd>→</kbd></button>
@@ -196,6 +217,18 @@
                 <span id="weekStreak" class="muted">连续 0 天</span>
               </div>
               <ol id="weekList" class="week"></ol>
+            </section>
+            <section class="me-block">
+              <h3>外观</h3>
+              <div class="segmented" id="themeChoices" role="group" aria-label="主题">
+                <button type="button" data-theme="light">浅色</button>
+                <button type="button" data-theme="dark">深色</button>
+                <button type="button" data-theme="system" class="is-on">跟随系统</button>
+              </div>
+              <label class="sound-row">
+                <input id="soundToggle" type="checkbox" checked />
+                <span>评分时播放轻轻的提示音</span>
+              </label>
             </section>
             <section class="me-block">
               <h3>每天新词</h3>
@@ -245,9 +278,18 @@
       </div>
 
       <nav class="tabbar">
-        <button class="tab active" data-target="study" type="button">学习</button>
-        <button class="tab" data-target="quiz" type="button">测验</button>
-        <button class="tab" data-target="me" type="button">我的</button>
+        <button class="tab active" data-target="study" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          <span>学习</span>
+        </button>
+        <button class="tab" data-target="quiz" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg>
+          <span>测验</span>
+        </button>
+        <button class="tab" data-target="me" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.2"/><path d="M5 19.2c1.4-3 3.8-4.4 7-4.4s5.6 1.4 7 4.4"/></svg>
+          <span>我的</span>
+        </button>
       </nav>
     </div>
 
@@ -294,8 +336,6 @@ Scene: {用一句具体画面描述这个词的日常场景}</pre>
       </div>
     </dialog>
 
-    <script src="./words.js" defer></script>
-    <script src="./atlas-map.js" defer></script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>

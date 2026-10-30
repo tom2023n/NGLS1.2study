@@ -1,5 +1,5 @@
 /* Shell updates come from the network. Images and audio stay cached. */
-const SHELL_CACHE = "ngsl-shell-v2";
+const SHELL_CACHE = "ngsl-shell-v4";
 const MEDIA_CACHE = "ngsl-media-v1";
 const SHELL = [
   "./",
@@ -7,8 +7,6 @@ const SHELL = [
   "./styles.css",
   "./app.js",
   "./logic.js",
-  "./words.js",
-  "./atlas-map.js",
   "./vendor/ts-fsrs.mjs",
   "./manifest.json",
   "./favicon.svg",
@@ -17,6 +15,7 @@ const SHELL = [
   "./icon-maskable-512.png",
   "./apple-touch-icon.png",
   "./THIRD_PARTY.md",
+  "./fonts/fraunces-latin.woff2",
 ];
 
 self.addEventListener("install", (event) => {

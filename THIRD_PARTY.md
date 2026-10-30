@@ -34,6 +34,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Fraunces
+
+英文词头使用 [Fraunces](https://github.com/undercasetype/Fraunces) 拉丁子集（可变字重），SIL Open Font License 1.1。许可全文在 `fonts/OFL.txt`。中文走系统宋体，不另外下载大字库。
+
+## 音效
+
+评分和翻卡用的是页面里用 Web Audio 生成的短提示音，不是词光仓库里的 `public/sfx`。那些界面声音没有单独写明可再分发的授权，所以没有拷贝。
+
 ## ts-fsrs
 
 间隔重复算法来自 [ts-fsrs](https://github.com/open-spaced-repetition/ts-fsrs) 5.4.2（FSRS-6），文件在 `vendor/ts-fsrs.mjs`。
