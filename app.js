@@ -1,161 +1,1021 @@
-const STORAGE_KEY = "ngsl-study-progress-v1";
-const DAILY_DATE_KEY = "ngsl-study-today";
+import {
+  DAILY_DATE_KEY,
+  Rating,
+  STORAGE_KEY,
+  dayStat,
+  formatInterval,
+  glossKey,
+  isMastered,
+  localDate,
+  migrateProgress,
+  pickDistractors,
+  preview,
+  review,
+  sanitizeText,
+  seemsMojibake,
+  statusOf,
+  touchDay,
+} from "./logic.js";
 
-const rawWords = Array.isArray(window.NGSL_WORDS) ? window.NGSL_WORDS : [];
-const words = rawWords.map((entry, index) => ({
-  ...entry,
-  chinese: sanitizeText(entry.chinese),
-  exampleChinese: sanitizeText(entry.exampleChinese),
-  definition: sanitizeText(entry.definition),
-  example: sanitizeText(entry.example),
-  partOfSpeech: sanitizeText(entry.partOfSpeech),
-  pronunciation: sanitizeText(entry.pronunciation),
-  initial: sanitizeText(entry.initial || entry.word?.[0] || ""),
-  index,
-}));
+const HUES = ["#c4573a", "#5f7a52", "#a07818", "#3f6584", "#8d4f72", "#3e6f68"];
+let words = [];
+let byId = new Map();
+
+function prepareWords() {
+  const rawWords = Array.isArray(window.NGSL_WORDS) ? window.NGSL_WORDS : [];
+  words = rawWords.map((entry) => ({
+    ...entry,
+    chinese: sanitizeText(entry.chinese),
+    exampleChinese: sanitizeText(entry.exampleChinese),
+    definition: sanitizeText(entry.definition),
+    example: sanitizeText(entry.example),
+    partOfSpeech: sanitizeText(entry.partOfSpeech),
+    pronunciation: sanitizeText(entry.pronunciation),
+  }));
+  byId = new Map(words.map((word) => [word.id, word]));
+}
 
 const state = {
-  filteredWords: [...words],
-  currentIndex: 0,
-  currentFilter: "all",
-  currentRank: "all",
-  reviewMode: "normal",
+  mode: "today",
+  queue: [],
+  index: 0,
+  filter: "all",
+  rank: "all",
   query: "",
   quiz: null,
+  grading: false,
   progress: loadProgress(),
   deferredPrompt: null,
 };
 
+const $ = (id) => document.getElementById(id);
 const els = {
-  heroWordCount: document.getElementById("heroWordCount"),
-  heroSubtitle: document.getElementById("heroSubtitle"),
-  progressLabel: document.getElementById("progressLabel"),
-  streakCount: document.getElementById("streakCount"),
-  progressBar: document.getElementById("progressBar"),
-  masteredCount: document.getElementById("masteredCount"),
-  todayCount: document.getElementById("todayCount"),
-  favoriteCount: document.getElementById("favoriteCount"),
-  searchInput: document.getElementById("searchInput"),
-  rankChips: document.getElementById("rankChips"),
-  filterChips: document.getElementById("filterChips"),
+  accentToggle: $("accentToggle"),
+  filterBtn: $("filterBtn"),
+  filterDialog: $("filterDialog"),
+  filterClose: $("filterClose"),
+  filterRoot: $("filterRoot"),
+  rail: $("rail"),
+  installBtn: $("installBtn"),
+  themeBtn: $("themeBtn"),
+  soundBtn: $("soundBtn"),
+  themeChoices: $("themeChoices"),
+  soundToggle: $("soundToggle"),
+  pagerRow: $("pagerRow"),
+  iosHint: $("iosHint"),
+  iosHintClose: $("iosHintClose"),
+  queueLabel: $("queueLabel"),
+  modeBtn: $("modeBtn"),
+  shuffleBtn: $("shuffleBtn"),
+  progressLabel: $("progressLabel"),
+  streakLabel: $("streakLabel"),
+  progressTrack: $("progressTrack"),
+  progressBar: $("progressBar"),
+  studyEmpty: $("studyEmpty"),
+  emptyCopy: $("emptyCopy"),
+  moreBtn: $("moreBtn"),
+  browseBtn: $("browseBtn"),
+  cardFrame: $("cardFrame"),
+  wordCard: $("wordCard"),
+  flipBtn: $("flipBtn"),
+  flipBackBtn: $("flipBackBtn"),
+  frontIllo: $("frontIllo"),
+  frontImg: $("frontImg"),
+  backIllo: $("backIllo"),
+  backImg: $("backImg"),
+  studyOrder: $("studyOrder"),
+  studyWord: $("studyWord"),
+  studyHint: $("studyHint"),
+  ipaRow: $("ipaRow"),
+  studyPos: $("studyPos"),
+  studyWordBack: $("studyWordBack"),
+  favoriteBtn: $("favoriteBtn"),
+  studyChinese: $("studyChinese"),
+  studyDefinition: $("studyDefinition"),
+  studyExample: $("studyExample"),
+  studyExampleChinese: $("studyExampleChinese"),
+  memoryNote: $("memoryNote"),
+  speakExampleBtn: $("speakExampleBtn"),
+  againBtn: $("againBtn"),
+  goodBtn: $("goodBtn"),
+  againIv: $("againIv"),
+  goodIv: $("goodIv"),
+  gradeRow: $("gradeRow"),
+  prevBtn: $("prevBtn"),
+  nextBtn: $("nextBtn"),
+  speakBtn: $("speakBtn"),
+  searchInput: $("searchInput"),
+  rankChips: $("rankChips"),
+  filterChips: $("filterChips"),
+  quizPrompt: $("quizPrompt"),
+  quizOptions: $("quizOptions"),
+  quizFeedback: $("quizFeedback"),
+  newQuizBtn: $("newQuizBtn"),
+  masteredCount: $("masteredCount"),
+  learningCount: $("learningCount"),
+  todayCount: $("todayCount"),
+  favoriteCount: $("favoriteCount"),
+  weekList: $("weekList"),
+  weekStreak: $("weekStreak"),
+  dailyNewInput: $("dailyNewInput"),
+  favoritesList: $("favoritesList"),
+  recentList: $("recentList"),
+  exportBtn: $("exportBtn"),
+  importBtn: $("importBtn"),
+  importFile: $("importFile"),
+  resetProgressBtn: $("resetProgressBtn"),
+  backupStatus: $("backupStatus"),
+  aboutBtn: $("aboutBtn"),
+  aboutDialog: $("aboutDialog"),
+  aboutClose: $("aboutClose"),
   tabs: [...document.querySelectorAll(".tab")],
   panels: [...document.querySelectorAll(".panel")],
-  card: document.getElementById("flipCardBtn"),
-  studyOrder: document.getElementById("studyOrder"),
-  studyWord: document.getElementById("studyWord"),
-  studyPronunciation: document.getElementById("studyPronunciation"),
-  studyPronunciationBack: document.getElementById("studyPronunciationBack"),
-  studyPos: document.getElementById("studyPos"),
-  studyHint: document.getElementById("studyHint"),
-  studyChinese: document.getElementById("studyChinese"),
-  studyDefinition: document.getElementById("studyDefinition"),
-  studyExample: document.getElementById("studyExample"),
-  studyExampleChinese: document.getElementById("studyExampleChinese"),
-  favoriteBtn: document.getElementById("favoriteBtn"),
-  prevBtn: document.getElementById("prevBtn"),
-  nextBtn: document.getElementById("nextBtn"),
-  shuffleBtn: document.getElementById("shuffleBtn"),
-  speakBtn: document.getElementById("speakBtn"),
-  speakExampleBtn: document.getElementById("speakExampleBtn"),
-  mistakeModeBtn: document.getElementById("mistakeModeBtn"),
-  hardBtn: document.getElementById("hardBtn"),
-  goodBtn: document.getElementById("goodBtn"),
-  quizPrompt: document.getElementById("quizPrompt"),
-  quizOptions: document.getElementById("quizOptions"),
-  quizFeedback: document.getElementById("quizFeedback"),
-  newQuizBtn: document.getElementById("newQuizBtn"),
-  favoritesList: document.getElementById("favoritesList"),
-  recentList: document.getElementById("recentList"),
-  resetProgressBtn: document.getElementById("resetProgressBtn"),
-  installBtn: document.getElementById("installBtn"),
 };
 
-init();
+let currentAudio = null;
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(src));
+    document.body.appendChild(script);
+  });
+}
+
+Promise.all([loadScript("./words.js"), loadScript("./atlas-map.js")])
+  .then(() => init())
+  .catch((error) => console.error(error));
 
 function init() {
+  prepareWords();
+  restoreView();
+  placeFilters();
   bindEvents();
-  restoreViewState();
-  applyFilters();
-  renderStats();
-  renderCard();
+  applyTheme();
+  rebuildQueue(true);
+  render();
   buildQuiz();
-  renderReviewLists();
+  setupInstall();
   registerServiceWorker();
 }
 
 function bindEvents() {
+  els.accentToggle.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-accent]");
+    if (!button) return;
+    state.progress.settings.accent = button.dataset.accent === "uk" ? "uk" : "us";
+    save();
+    render();
+    speakCurrentWord();
+  });
+  els.filterBtn.addEventListener("click", () => els.filterDialog.showModal());
+  els.filterClose.addEventListener("click", () => els.filterDialog.close());
   els.searchInput.addEventListener("input", (event) => {
     state.query = event.target.value.trim().toLowerCase();
-    applyFilters();
+    if (state.query) state.mode = "browse";
+    rebuildQueue(true);
+    render();
   });
-
   els.rankChips.addEventListener("click", (event) => {
     const button = event.target.closest("[data-rank]");
     if (!button) return;
-    persistViewState();
-    state.currentRank = button.dataset.rank;
-    [...els.rankChips.querySelectorAll(".chip")].forEach((chip) => {
-      chip.classList.toggle("active", chip === button);
-    });
-    applyFilters();
+    state.rank = button.dataset.rank;
+    syncChips();
+    rebuildQueue(true);
+    render();
   });
-
   els.filterChips.addEventListener("click", (event) => {
     const button = event.target.closest("[data-filter]");
     if (!button) return;
-    persistViewState();
-    state.currentFilter = button.dataset.filter;
-    [...els.filterChips.querySelectorAll(".chip")].forEach((chip) => {
-      chip.classList.toggle("active", chip === button);
-    });
-    applyFilters();
+    state.filter = button.dataset.filter;
+    state.mode = "browse";
+    syncChips();
+    rebuildQueue(true);
+    render();
   });
-
-  els.tabs.forEach((tab) => {
-    tab.addEventListener("click", () => switchPanel(tab.dataset.target));
+  els.tabs.forEach((tab) => tab.addEventListener("click", () => switchPanel(tab.dataset.target)));
+  els.modeBtn.addEventListener("click", () => {
+    state.mode = state.mode === "today" ? "browse" : "today";
+    rebuildQueue(true);
+    render();
   });
-
-  els.card.addEventListener("click", (event) => {
-    if (event.target.closest("#favoriteBtn")) return;
-    els.card.classList.toggle("is-flipped");
-  });
-
-  els.card.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    els.card.classList.toggle("is-flipped");
-  });
-
-  els.favoriteBtn.addEventListener("click", (event) => {
-    event.stopPropagation();
-    const word = getCurrentWord();
-    if (!word) return;
-    toggleFavorite(word.id);
-  });
-
-  els.prevBtn.addEventListener("click", () => stepCard(-1));
-  els.nextBtn.addEventListener("click", () => stepCard(1));
   els.shuffleBtn.addEventListener("click", () => {
-    if (!state.filteredWords.length) return;
-    state.currentIndex = Math.floor(Math.random() * state.filteredWords.length);
-    resetCardFace();
-    renderCard();
+    if (!state.queue.length) return;
+    state.index = Math.floor(Math.random() * state.queue.length);
+    resetFace();
+    render();
   });
+  els.flipBtn.addEventListener("click", flip);
+  els.flipBackBtn.addEventListener("click", flip);
+  els.favoriteBtn.addEventListener("click", () => {
+    const word = currentWord();
+    if (word) toggleFavorite(word.id);
+  });
+  els.prevBtn.addEventListener("click", () => step(-1));
+  els.nextBtn.addEventListener("click", () => step(1));
   els.speakBtn.addEventListener("click", speakCurrentWord);
   els.speakExampleBtn.addEventListener("click", speakCurrentExample);
-  els.mistakeModeBtn.addEventListener("click", toggleMistakeMode);
-  els.hardBtn.addEventListener("click", () => rateWord("learning"));
-  els.goodBtn.addEventListener("click", () => rateWord("mastered"));
-
+  els.againBtn.addEventListener("click", () => grade(Rating.Again));
+  els.goodBtn.addEventListener("click", () => grade(Rating.Good));
+  els.moreBtn.addEventListener("click", () => {
+    touchDay(state.progress, Date.now(), { extra: 5 });
+    save();
+    state.mode = "today";
+    rebuildQueue(true);
+    render();
+  });
+  els.browseBtn.addEventListener("click", () => {
+    state.mode = "browse";
+    state.filter = "all";
+    syncChips();
+    rebuildQueue(true);
+    render();
+  });
   els.newQuizBtn.addEventListener("click", buildQuiz);
+  els.dailyNewInput.addEventListener("change", () => {
+    const value = Math.max(0, Math.min(50, Number(els.dailyNewInput.value) || 0));
+    state.progress.settings.dailyNew = value;
+    els.dailyNewInput.value = String(value);
+    save();
+    if (state.mode === "today") rebuildQueue(false);
+    render();
+  });
+  els.exportBtn.addEventListener("click", exportProgress);
+  els.importBtn.addEventListener("click", () => els.importFile.click());
+  els.importFile.addEventListener("change", importProgress);
   els.resetProgressBtn.addEventListener("click", resetProgress);
+  els.aboutBtn.addEventListener("click", () => els.aboutDialog.showModal());
+  els.aboutClose.addEventListener("click", () => els.aboutDialog.close());
+  els.iosHintClose.addEventListener("click", () => {
+    localStorage.setItem("ngsl-ios-hint-dismissed", "1");
+    els.iosHint.classList.add("hidden");
+  });
+  els.themeBtn.addEventListener("click", () => setTheme(nextTheme(state.progress.settings.theme)));
+  els.themeChoices.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-theme]");
+    if (!button) return;
+    setTheme(button.dataset.theme);
+  });
+  els.soundBtn.addEventListener("click", () => setSound(!state.progress.settings.sound));
+  els.soundToggle.addEventListener("change", () => setSound(els.soundToggle.checked));
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+  window.matchMedia("(min-width: 1000px)").addEventListener("change", placeFilters);
+  document.addEventListener("keydown", onKeydown);
+  if ("speechSynthesis" in window) {
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+  }
+}
 
+function onKeydown(event) {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const tag = event.target?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  const panel = activePanel();
+  if (panel === "study") {
+    if (event.key === " " && tag !== "BUTTON") {
+      event.preventDefault();
+      flip();
+    } else if (event.key === " " && event.target?.id === "flipBtn") {
+      event.preventDefault();
+      flip();
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      step(-1);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      step(1);
+    } else if (event.key === "1") {
+      event.preventDefault();
+      grade(Rating.Again);
+    } else if (event.key === "2") {
+      event.preventDefault();
+      grade(Rating.Good);
+    }
+    return;
+  }
+  if (panel === "quiz" && state.quiz) {
+    if (!state.quiz.answered && /^[1-4]$/.test(event.key)) {
+      const button = els.quizOptions.querySelectorAll(".quiz-option")[Number(event.key) - 1];
+      if (button) {
+        event.preventDefault();
+        button.click();
+      }
+    } else if (state.quiz.answered && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      buildQuiz();
+    }
+  }
+}
+
+function placeFilters() {
+  const desktop = window.matchMedia("(min-width: 1000px)").matches;
+  if (desktop) {
+    els.rail.append(els.filterRoot);
+    if (els.filterDialog.open) els.filterDialog.close();
+  } else if (!els.filterDialog.contains(els.filterRoot)) {
+    els.filterDialog.append(els.filterRoot);
+  }
+}
+
+function loadProgress() {
+  try {
+    return migrateProgress(JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"));
+  } catch {
+    return migrateProgress(null);
+  }
+}
+
+function save() {
+  state.progress.version = 2;
+  state.progress[DAILY_DATE_KEY] = localDate();
+  state.progress.lastMode = state.mode;
+  state.progress.lastFilter = state.filter;
+  state.progress.lastRank = state.rank;
+  state.progress.lastQuery = state.query;
+  state.progress.lastPanel = activePanel();
+  const word = currentWord();
+  if (word) {
+    state.progress.lastWordId = word.id;
+    state.progress.viewPositions[viewKey()] = word.id;
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.progress));
+}
+
+function restoreView() {
+  state.filter = state.progress.lastFilter || "all";
+  state.rank = state.progress.lastRank || "all";
+  state.mode = state.progress.lastMode === "browse" ? "browse" : "today";
+  state.query = state.progress.lastQuery || "";
+  els.searchInput.value = state.query;
+  els.dailyNewInput.value = String(state.progress.settings.dailyNew ?? 10);
+  syncChips();
+  switchPanel(state.progress.lastPanel || "study", false);
+}
+
+function viewKey() {
+  return [state.mode, state.filter, state.rank, state.query].join("|");
+}
+
+function cardOf(id) {
+  return state.progress.cards[String(id)];
+}
+
+function currentWord() {
+  return state.queue[state.index] || null;
+}
+
+function activePanel() {
+  return els.panels.find((panel) => panel.classList.contains("active"))?.dataset.panel || "study";
+}
+
+function inRank(word) {
+  if (state.rank === "all") return true;
+  const [start, end] = state.rank.split("-").map(Number);
+  return word.id >= start && word.id <= end;
+}
+
+function matchesBrowse(word) {
+  if (!inRank(word)) return false;
+  const query = state.query;
+  if (query) {
+    const hay = `${word.word} ${word.chinese} ${word.definition} ${word.partOfSpeech}`.toLowerCase();
+    if (!hay.includes(query)) return false;
+  }
+  const status = statusOf(cardOf(word.id));
+  if (state.filter === "favorites") return state.progress.favorites.includes(word.id);
+  if (state.filter === "due") return !!cardOf(word.id) && cardOf(word.id).due <= Date.now();
+  if (state.filter === "all") return true;
+  return status === state.filter;
+}
+
+function rebuildQueue(resetIndex) {
+  const saved = state.progress.viewPositions[viewKey()] || state.progress.lastWordId;
+  if (state.mode === "browse") {
+    state.queue = words.filter(matchesBrowse);
+  } else {
+    const now = Date.now();
+    const due = words
+      .filter((word) => cardOf(word.id) && cardOf(word.id).due <= now)
+      .sort((a, b) => cardOf(a.id).due - cardOf(b.id).due);
+    const today = dayStat(state.progress, now);
+    const room = Math.max(0, (state.progress.settings.dailyNew || 0) + (today.extra || 0) - (today.n || 0));
+    const fresh = words.filter((word) => inRank(word) && !cardOf(word.id)).slice(0, room);
+    state.queue = [...due, ...fresh];
+  }
+  if (!resetIndex && state.index < state.queue.length) return;
+  const found = saved ? state.queue.findIndex((word) => word.id === saved) : -1;
+  state.index = found >= 0 ? found : 0;
+  resetFace();
+}
+
+function step(direction) {
+  if (!state.queue.length) return;
+  state.index = (state.index + direction + state.queue.length) % state.queue.length;
+  resetFace();
+  render();
+  save();
+}
+
+function flip() {
+  if (!currentWord()) return;
+  els.wordCard.classList.toggle("is-flipped");
+  els.flipBtn.setAttribute("aria-pressed", String(els.wordCard.classList.contains("is-flipped")));
+  cueFlip();
+}
+
+function resetFace() {
+  els.wordCard.classList.remove("is-flipped");
+  els.flipBtn.setAttribute("aria-pressed", "false");
+  const body = els.wordCard.querySelector(".back-body");
+  if (body) body.scrollTop = 0;
+}
+
+function grade(rating) {
+  const word = currentWord();
+  if (!word || activePanel() !== "study" || state.grading) return;
+  state.grading = true;
+  const now = Date.now();
+  const prev = cardOf(word.id);
+  const next = review(prev, rating, now, 0.9, true);
+  state.progress.cards[String(word.id)] = next;
+  touchDay(state.progress, now, {
+    n: prev ? 0 : 1,
+    r: 1,
+    c: rating === Rating.Again ? 0 : 1,
+  });
+  rememberRecent(word.id);
+  els.wordCard.classList.add(rating === Rating.Again ? "is-again" : "is-good");
+  cueGrade(rating);
+  const wait = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 40 : 360;
+  window.setTimeout(() => {
+    els.wordCard.classList.remove("is-again", "is-good");
+    if (state.mode === "today") {
+      state.queue = state.queue.filter((item) => item.id !== word.id);
+      if (next.due - now < 20 * 60 * 1000) {
+        const at = Math.min(state.queue.length, state.index + 2);
+        state.queue.splice(at, 0, word);
+      }
+      if (state.index >= state.queue.length) state.index = 0;
+    } else if (state.queue.length) {
+      state.index = (state.index + 1) % state.queue.length;
+    }
+    resetFace();
+    state.grading = false;
+    save();
+    render();
+  }, wait);
+}
+
+function toggleFavorite(id) {
+  const favorites = new Set(state.progress.favorites);
+  if (favorites.has(id)) favorites.delete(id);
+  else favorites.add(id);
+  state.progress.favorites = [...favorites];
+  rememberRecent(id);
+  save();
+  render();
+}
+
+function rememberRecent(id) {
+  state.progress.recent = [id, ...state.progress.recent.filter((item) => item !== id)].slice(0, 20);
+}
+
+function render() {
+  renderStats();
+  renderCard();
+  renderMe();
+  syncAccent();
+  syncSound();
+}
+
+function themeLabel(choice) {
+  if (choice === "light") return "浅色";
+  if (choice === "dark") return "深色";
+  return "自动";
+}
+
+function nextTheme(current) {
+  const order = ["system", "light", "dark"];
+  return order[(Math.max(0, order.indexOf(current)) + 1) % order.length];
+}
+
+function setTheme(theme) {
+  state.progress.settings.theme = theme === "light" || theme === "dark" ? theme : "system";
+  save();
+  applyTheme();
+}
+
+function applyTheme() {
+  const choice = state.progress.settings.theme || "system";
+  const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const dark = choice === "dark" || (choice === "system" && systemDark);
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", dark ? "#0d1120" : "#f6f1e7");
+  if (els.themeBtn) {
+    els.themeBtn.textContent = themeLabel(choice);
+    els.themeBtn.setAttribute("aria-label", `${themeLabel(choice)}，切换主题`);
+  }
+  if (els.themeChoices) {
+    [...els.themeChoices.querySelectorAll("button")].forEach((button) => {
+      button.classList.toggle("is-on", button.dataset.theme === choice);
+    });
+  }
+}
+
+function setSound(on) {
+  state.progress.settings.sound = Boolean(on);
+  save();
+  syncSound();
+}
+
+function syncSound() {
+  const on = state.progress.settings.sound !== false;
+  if (els.soundToggle) els.soundToggle.checked = on;
+  if (!els.soundBtn) return;
+  els.soundBtn.setAttribute("aria-pressed", String(on));
+  els.soundBtn.setAttribute("aria-label", on ? "关闭音效" : "打开音效");
+  els.soundBtn.classList.toggle("is-off", !on);
+}
+
+let audioCtx;
+function tone(freq, when, duration, level, type = "sine") {
+  if (state.progress.settings.sound === false) return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  if (!audioCtx) audioCtx = new Ctx();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  const start = audioCtx.currentTime + when;
+  gain.gain.setValueAtTime(level, start);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(start);
+  osc.stop(start + duration);
+}
+
+function cueGrade(rating) {
+  if (rating === Rating.Again) {
+    tone(196, 0, 0.16, 0.035, "triangle");
+    return;
+  }
+  tone(523, 0, 0.11, 0.04);
+  tone(784, 0.09, 0.16, 0.03);
+}
+
+function cueFlip() {
+  tone(660, 0, 0.04, 0.018);
+}
+
+function syncAccent() {
+  const accent = state.progress.settings.accent === "uk" ? "uk" : "us";
+  [...els.accentToggle.querySelectorAll("button")].forEach((button) => {
+    button.classList.toggle("is-on", button.dataset.accent === accent);
+  });
+}
+
+function syncChips() {
+  [...els.rankChips.querySelectorAll(".chip")].forEach((chip) => {
+    chip.classList.toggle("active", chip.dataset.rank === state.rank);
+  });
+  [...els.filterChips.querySelectorAll(".chip")].forEach((chip) => {
+    chip.classList.toggle("active", chip.dataset.filter === state.filter);
+  });
+}
+
+function renderStats() {
+  const mastered = words.filter((word) => isMastered(cardOf(word.id))).length;
+  const learning = words.filter((word) => statusOf(cardOf(word.id)) === "learning").length;
+  const percent = words.length ? Math.round((mastered / words.length) * 100) : 0;
+  const today = dayStat(state.progress);
+  els.progressLabel.textContent = `掌握 ${percent}%`;
+  els.streakLabel.textContent = `连续 ${state.progress.streak || 0} 天`;
+  els.progressBar.style.width = `${percent}%`;
+  els.progressTrack.setAttribute("aria-valuenow", String(percent));
+  els.masteredCount.textContent = String(mastered);
+  els.learningCount.textContent = String(learning);
+  els.todayCount.textContent = String(today.r || 0);
+  els.favoriteCount.textContent = String(state.progress.favorites.length);
+  els.weekStreak.textContent = `连续 ${state.progress.streak || 0} 天`;
+  const due = words.filter((word) => cardOf(word.id) && cardOf(word.id).due <= Date.now()).length;
+  const fresh = state.mode === "today" ? state.queue.filter((word) => !cardOf(word.id)).length : 0;
+  if (state.mode === "today") {
+    els.queueLabel.textContent = due || fresh ? `复习 ${due} · 新词 ${fresh}` : "今日队列已完成";
+    els.modeBtn.textContent = "浏览词库";
+  } else {
+    els.queueLabel.textContent = `浏览 ${state.queue.length} 个词`;
+    els.modeBtn.textContent = "回到今日";
+  }
+}
+
+function atlasOf(word) {
+  const row = window.NGSL_ATLAS?.[word.word.toLowerCase()];
+  if (!row) return null;
+  return { id: row[0], uk: row[1] || "", us: row[2] || "", flags: row[3] || 0 };
+}
+
+function paintIllo(figure, img, word, eager) {
+  const atlas = atlasOf(word);
+  const hue = HUES[Math.abs(hash(word.word)) % HUES.length];
+  figure.style.setProperty("--hue", hue);
+  figure.style.setProperty("--len", String(Math.max(3, word.word.length)));
+  const initial = figure.querySelector(".plate-initial");
+  const label = figure.querySelector(".plate-word");
+  if (initial) initial.textContent = word.word.slice(0, 1).toUpperCase();
+  if (label) label.textContent = word.word;
+  const showImage = !!(atlas && atlas.flags & 1);
+  figure.classList.remove("is-loaded");
+  if (!showImage) {
+    img.removeAttribute("src");
+    figure.classList.add("is-fallback");
+    return;
+  }
+  figure.classList.remove("is-fallback");
+  const src = `./assets/thumb/${atlas.id}.webp`;
+  img.alt = `${word.word} 插画`;
+  img.loading = eager ? "eager" : "lazy";
+  img.onload = () => figure.classList.add("is-loaded");
+  img.onerror = () => {
+    figure.classList.remove("is-loaded");
+    figure.classList.add("is-fallback");
+    img.removeAttribute("src");
+  };
+  if (img.getAttribute("src") !== src) img.src = src;
+  if (img.complete && img.naturalWidth > 0) figure.classList.add("is-loaded");
+}
+
+function renderCard() {
+  const word = currentWord();
+  const empty = !word;
+  els.studyEmpty.classList.toggle("hidden", !empty);
+  els.cardFrame.classList.toggle("hidden", empty);
+  els.gradeRow.classList.toggle("hidden", empty);
+  els.pagerRow.classList.toggle("hidden", empty);
+  if (!word) {
+    const today = dayStat(state.progress);
+    els.emptyCopy.textContent = `今天已评分 ${today.r || 0} 次，新认识 ${today.n || 0} 个词。到期的都会再出现。`;
+    return;
+  }
+  const atlas = atlasOf(word);
+  const status = statusOf(cardOf(word.id));
+  const statusText = status === "mastered" ? "已掌握" : status === "learning" ? "学习中" : "未学";
+  els.studyOrder.textContent = `#${word.id} · ${statusText}`;
+  els.studyWord.textContent = word.word;
+  els.studyWordBack.textContent = word.word;
+  els.studyHint.textContent = "轻点查看释义和例句";
+  els.flipBtn.removeAttribute("aria-label");
+  els.studyPos.textContent = word.partOfSpeech || "word";
+  els.studyChinese.textContent = displayChinese(word.chinese);
+  els.studyDefinition.textContent = word.definition || "暂无英文释义。";
+  els.studyExample.textContent = word.example || "";
+  els.studyExampleChinese.textContent = displayChinese(word.exampleChinese);
+  const favorite = state.progress.favorites.includes(word.id);
+  els.favoriteBtn.textContent = favorite ? "★" : "☆";
+  els.favoriteBtn.classList.toggle("is-on", favorite);
+  els.favoriteBtn.setAttribute("aria-pressed", String(favorite));
+  els.favoriteBtn.setAttribute("aria-label", favorite ? "取消收藏" : "收藏单词");
+  const wordKey = String(word.id);
+  if (!els.cardFrame.dataset.word) {
+    els.cardFrame.dataset.word = wordKey;
+  } else if (els.cardFrame.dataset.word !== wordKey) {
+    els.cardFrame.dataset.word = wordKey;
+    els.cardFrame.classList.remove("is-entering");
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      void els.cardFrame.offsetWidth;
+      els.cardFrame.classList.add("is-entering");
+    }
+  }
+  paintIllo(els.frontIllo, els.frontImg, word, true);
+  paintIllo(els.backIllo, els.backImg, word, false);
+  renderIpa(word, atlas);
+  const card = cardOf(word.id);
+  const intervals = preview(card, Date.now(), 0.9, false);
+  els.againIv.textContent = formatInterval(intervals[Rating.Again]);
+  els.goodIv.textContent = formatInterval(intervals[Rating.Good]);
+  els.memoryNote.textContent = card
+    ? `${card.due <= Date.now() ? "现在可以复习" : `下次 ${formatInterval(card.due - Date.now())}后`} · 稳定度 ${card.s < 1 ? "<1" : Math.round(card.s)} 天 · 已复习 ${card.reps} 次`
+    : "还没评过分。按 1 或 2 会开始安排复习，不会一次就标成已掌握。";
+}
+
+function renderIpa(word, atlas) {
+  els.ipaRow.replaceChildren();
+  const accent = state.progress.settings.accent === "uk" ? "uk" : "us";
+  if (atlas && (atlas.uk || atlas.us)) {
+    const items = [
+      ["uk", "英", atlas.uk],
+      ["us", "美", atlas.us],
+    ].filter((item) => item[2]);
+    for (const [key, label, ipa] of items) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `ipa-btn${key === accent ? " is-on" : ""}`;
+      const em = document.createElement("em");
+      em.textContent = label;
+      const span = document.createElement("span");
+      span.className = "ipa";
+      span.textContent = ipa;
+      button.append(em, span);
+      button.addEventListener("click", () => {
+        state.progress.settings.accent = key;
+        save();
+        render();
+        speakCurrentWord();
+      });
+      els.ipaRow.append(button);
+    }
+    return;
+  }
+  const span = document.createElement("span");
+  span.className = "ipa";
+  span.textContent = word.pronunciation || "";
+  els.ipaRow.append(span);
+}
+
+function displayChinese(text) {
+  return seemsMojibake(text) ? "" : text;
+}
+
+function renderMe() {
+  renderWeek();
+  renderWordList(els.favoritesList, state.progress.favorites.map((id) => byId.get(id)), "还没有收藏");
+  renderWordList(els.recentList, state.progress.recent.map((id) => byId.get(id)), "最近还没有学习记录");
+}
+
+function renderWeek() {
+  els.weekList.replaceChildren();
+  const today = localDate();
+  for (let offset = 6; offset >= 0; offset -= 1) {
+    const date = new Date();
+    date.setDate(date.getDate() - offset);
+    const key = localDate(date);
+    const count = state.progress.days[key]?.r || 0;
+    const item = document.createElement("li");
+    if (key === today) item.classList.add("is-today");
+    const bar = document.createElement("span");
+    const fill = document.createElement("i");
+    fill.style.setProperty("--h", String(Math.min(1, count / 20)));
+    bar.append(fill);
+    const label = document.createElement("small");
+    label.textContent = "日一二三四五六"[date.getDay()];
+    item.title = `${key}：${count} 次评分`;
+    item.append(bar, label);
+    els.weekList.append(item);
+  }
+}
+
+function renderWordList(container, entries, emptyText) {
+  container.replaceChildren();
+  const valid = entries.filter(Boolean).slice(0, 12);
+  if (!valid.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = emptyText;
+    container.append(empty);
+    return;
+  }
+  for (const word of valid) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "word-item";
+    button.addEventListener("click", () => openWord(word.id));
+    const left = document.createElement("span");
+    const title = document.createElement("strong");
+    title.textContent = word.word;
+    title.lang = "en";
+    const meta = document.createElement("p");
+    meta.className = "word-meta";
+    meta.textContent = `${word.partOfSpeech || "word"} · ${labelStatus(statusOf(cardOf(word.id)))}`;
+    left.append(title, meta);
+    const right = document.createElement("span");
+    right.className = "word-item-cn";
+    right.textContent = displayChinese(word.chinese);
+    button.append(left, right);
+    container.append(button);
+  }
+}
+
+function labelStatus(status) {
+  if (status === "mastered") return "已掌握";
+  if (status === "learning") return "学习中";
+  return "未学";
+}
+
+function openWord(id) {
+  switchPanel("study");
+  state.mode = "browse";
+  state.filter = "all";
+  state.rank = "all";
+  state.query = "";
+  els.searchInput.value = "";
+  syncChips();
+  rebuildQueue(false);
+  const index = state.queue.findIndex((word) => word.id === id);
+  state.index = index >= 0 ? index : 0;
+  resetFace();
+  render();
+  save();
+}
+
+function switchPanel(name, persist = true) {
+  els.tabs.forEach((tab) => {
+    const on = tab.dataset.target === name;
+    tab.classList.toggle("active", on);
+    tab.setAttribute("aria-current", on ? "page" : "false");
+  });
+  els.panels.forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === name));
+  if (name === "quiz" && !state.quiz) buildQuiz();
+  if (persist) save();
+}
+
+function buildQuiz() {
+  const pool = (state.mode === "browse" && state.queue.length ? state.queue : words).filter(
+    (word) => glossKey(word.chinese) && !seemsMojibake(word.chinese)
+  );
+  const source = pool.length ? pool : words;
+  const answer = source[Math.floor(Math.random() * source.length)];
+  const distractors = pickDistractors(answer, words, 3);
+  const options = shuffle([answer, ...distractors]);
+  const duplicates = words.filter((word) => glossKey(word.chinese) === glossKey(answer.chinese)).length;
+  state.quiz = { answerId: answer.id, answered: false };
+  els.quizPrompt.textContent = duplicates > 1 ? `${answer.chinese}（${answer.partOfSpeech}）` : answer.chinese || answer.definition;
+  els.quizFeedback.textContent = "";
+  els.newQuizBtn.textContent = "换一题";
+  els.quizOptions.replaceChildren();
+  options.forEach((word, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "quiz-option";
+    const key = document.createElement("kbd");
+    key.textContent = String(index + 1);
+    const label = document.createElement("span");
+    label.lang = "en";
+    label.textContent = word.word;
+    button.append(key, label);
+    button.addEventListener("click", () => answerQuiz(button, word, answer));
+    els.quizOptions.append(button);
+  });
+}
+
+function answerQuiz(button, choice, answer) {
+  if (state.quiz?.answered) return;
+  state.quiz.answered = true;
+  const correct = choice.id === answer.id;
+  const now = Date.now();
+  const prev = cardOf(answer.id);
+  const next = review(prev, correct ? Rating.Good : Rating.Again, now, 0.9, true);
+  state.progress.cards[String(answer.id)] = next;
+  touchDay(state.progress, now, { n: prev ? 0 : 1, r: 1, c: correct ? 1 : 0 });
+  rememberRecent(answer.id);
+  [...els.quizOptions.querySelectorAll(".quiz-option")].forEach((item) => {
+    item.disabled = true;
+  });
+  button.classList.add(correct ? "correct" : "wrong");
+  const correctButton = [...els.quizOptions.querySelectorAll(".quiz-option")].find(
+    (item) => item.querySelector("span")?.textContent === answer.word
+  );
+  if (correctButton) correctButton.classList.add("correct");
+  const when = formatInterval(next.due - now);
+  els.quizFeedback.textContent = correct
+    ? `答对了：${answer.word}。下次大约 ${when}后。`
+    : `正确答案是 ${answer.word}。下次大约 ${when}后再见。`;
+  els.newQuizBtn.textContent = "下一题";
+  cueGrade(correct ? Rating.Good : Rating.Again);
+  save();
+  renderStats();
+  renderMe();
+  speakWord(answer);
+}
+
+function exportProgress() {
+  const payload = {
+    app: "ngsl-study",
+    version: 2,
+    exported: new Date().toISOString(),
+    progress: state.progress,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `ngsl-progress-${localDate()}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  els.backupStatus.textContent = "已导出。文件只包含学习进度，不含词库。";
+}
+
+function importProgress() {
+  const file = els.importFile.files?.[0];
+  els.importFile.value = "";
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(String(reader.result));
+      const progress = data && data.progress ? data.progress : data;
+      if (!progress || typeof progress !== "object") throw new Error("empty");
+      const ok = window.confirm("导入会覆盖这台设备上的学习进度。继续吗？");
+      if (!ok) return;
+      state.progress = migrateProgress(progress);
+      save();
+      restoreView();
+      rebuildQueue(true);
+      render();
+      buildQuiz();
+      els.backupStatus.textContent = `已导入 ${Object.keys(state.progress.cards).length} 条记忆记录。`;
+    } catch {
+      els.backupStatus.textContent = "这个文件不是可识别的进度 JSON。";
+    }
+  };
+  reader.readAsText(file);
+}
+
+function resetProgress() {
+  if (!window.confirm("确定清空收藏、连续天数和全部记忆进度吗？")) return;
+  const settings = state.progress.settings;
+  state.progress = migrateProgress(null);
+  state.progress.settings = settings;
+  state.mode = "today";
+  state.filter = "all";
+  state.rank = "all";
+  state.query = "";
+  els.searchInput.value = "";
+  syncChips();
+  save();
+  rebuildQueue(true);
+  render();
+  buildQuiz();
+  els.backupStatus.textContent = "进度已重置。";
+}
+
+function speakCurrentWord() {
+  const word = currentWord();
+  if (word) speakWord(word);
+}
+
+function speakCurrentExample() {
+  const word = currentWord();
+  if (word?.example) speakText(word.example, state.progress.settings.accent);
+}
+
+function speakWord(word) {
+  const atlas = atlasOf(word);
+  const accent = state.progress.settings.accent === "uk" ? "uk" : "us";
+  const hasAudio = atlas && atlas.flags & (accent === "uk" ? 2 : 4);
+  if (hasAudio) {
+    playUrl(`./assets/audio/${accent}/${atlas.id}.mp3`).catch(() => speakText(word.word, accent));
+    return;
+  }
+  speakText(word.word, accent);
+}
+
+function playUrl(url) {
+  if (currentAudio) currentAudio.pause();
+  const audio = new Audio(url);
+  currentAudio = audio;
+  return audio.play();
+}
+
+function speakText(text, accent) {
+  if (!text || !window.speechSynthesis) return;
+  if (currentAudio) currentAudio.pause();
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  const lang = accent === "uk" ? "en-GB" : "en-US";
+  utterance.lang = lang;
+  utterance.rate = 0.92;
+  const voices = window.speechSynthesis.getVoices();
+  const wanted = lang.toLowerCase();
+  const pool = voices.filter((voice) => (voice.lang || "").toLowerCase().replace("_", "-").startsWith(wanted.slice(0, 5).toLowerCase()) || (voice.lang || "").toLowerCase().startsWith(wanted.slice(0, 2)));
+  const match = pool.filter((voice) => (voice.lang || "").toLowerCase().replace("_", "-") === wanted.toLowerCase());
+  const list = match.length ? match : pool;
+  const preferred =
+    list.find((voice) => /natural|premium|enhanced|google/i.test(voice.name)) ||
+    list.find((voice) => (accent === "uk" ? /daniel|serena|kate|arthur|martha/i : /samantha|aaron|nicky|ava|allison/i).test(voice.name)) ||
+    list[0];
+  if (preferred) {
+    utterance.voice = preferred;
+    utterance.lang = preferred.lang || lang;
+  }
+  window.speechSynthesis.speak(utterance);
+}
+
+function setupInstall() {
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const standalone = window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
+  if (ios && !standalone && !localStorage.getItem("ngsl-ios-hint-dismissed")) {
+    els.iosHint.classList.remove("hidden");
+  }
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
     state.deferredPrompt = event;
     els.installBtn.classList.remove("hidden");
   });
-
   els.installBtn.addEventListener("click", async () => {
     if (!state.deferredPrompt) return;
     state.deferredPrompt.prompt();
@@ -165,551 +1025,40 @@ function bindEvents() {
   });
 }
 
-function sanitizeText(value) {
-  if (typeof value !== "string") return "";
-  return value.replace(/\?$/g, "").trim();
-}
-
-function seemsMojibake(text) {
-  if (!text) return false;
-  return /[閸掓瑥娴犻弰閺堥幋閸︽径]/.test(text);
-}
-
-function loadProgress() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    const today = new Date().toISOString().slice(0, 10);
-    stored.status = stored.status || {};
-    stored.favorites = stored.favorites || [];
-    stored.recent = stored.recent || [];
-    stored.todayDone = stored.todayDone || 0;
-    stored.streak = stored.streak || 0;
-    stored.lastStudyDate = stored.lastStudyDate || "";
-    stored.lastWordId = stored.lastWordId || null;
-    stored.lastFilter = stored.lastFilter || "all";
-    stored.lastRank = stored.lastRank || "all";
-    stored.lastReviewMode = stored.lastReviewMode || "normal";
-    stored.lastQuery = stored.lastQuery || "";
-    stored.lastPanel = stored.lastPanel || "study";
-    stored.viewPositions = stored.viewPositions || {};
-    if (stored[DAILY_DATE_KEY] !== today) {
-      stored.todayDone = 0;
-      stored[DAILY_DATE_KEY] = today;
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  let hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (hadController) window.location.reload();
+    hadController = true;
+  });
+  navigator.serviceWorker.register("./sw.js").then((registration) => {
+    if (registration.waiting && navigator.serviceWorker.controller) {
+      registration.waiting.postMessage("SKIP_WAITING");
     }
-    return stored;
-  } catch {
-    return {
-      status: {},
-      favorites: [],
-      recent: [],
-      todayDone: 0,
-      streak: 0,
-      lastStudyDate: "",
-      lastWordId: null,
-      lastFilter: "all",
-      lastRank: "all",
-      lastReviewMode: "normal",
-      lastQuery: "",
-      lastPanel: "study",
-      viewPositions: {},
-      [DAILY_DATE_KEY]: new Date().toISOString().slice(0, 10),
-    };
-  }
-}
-
-function saveProgress() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.progress));
-}
-
-function getViewKey() {
-  return [
-    state.currentFilter,
-    state.currentRank,
-    state.reviewMode,
-    state.query || ""
-  ].join("|");
-}
-
-function persistViewState() {
-  const currentWord = getCurrentWord();
-  if (currentWord) {
-    state.progress.lastWordId = currentWord.id;
-    state.progress.viewPositions[getViewKey()] = currentWord.id;
-  }
-  state.progress.lastFilter = state.currentFilter;
-  state.progress.lastRank = state.currentRank;
-  state.progress.lastReviewMode = state.reviewMode;
-  state.progress.lastQuery = state.query;
-  state.progress.lastPanel =
-    els.panels.find((panel) => panel.classList.contains("active"))?.dataset.panel || "study";
-  saveProgress();
-}
-
-function restoreViewState() {
-  state.currentFilter = state.progress.lastFilter || "all";
-  state.currentRank = state.progress.lastRank || "all";
-  state.reviewMode = state.progress.lastReviewMode || "normal";
-  state.query = state.progress.lastQuery || "";
-  els.searchInput.value = state.query;
-
-  [...els.filterChips.querySelectorAll(".chip")].forEach((chip) => {
-    chip.classList.toggle("active", chip.dataset.filter === state.currentFilter);
-  });
-  [...els.rankChips.querySelectorAll(".chip")].forEach((chip) => {
-    chip.classList.toggle("active", chip.dataset.rank === state.currentRank);
-  });
-  switchPanel(state.progress.lastPanel || "study");
-}
-
-function getStatus(id) {
-  return state.progress.status[id] || "unseen";
-}
-
-function getCurrentWord() {
-  return state.filteredWords[state.currentIndex] || null;
-}
-
-function applyFilters() {
-  const query = state.query;
-  const filtered = words.filter((word) => {
-    const status = getStatus(word.id);
-    const isFavorite = state.progress.favorites.includes(word.id);
-    const matchesRank = inRankRange(word.id, state.currentRank);
-    const matchesQuery =
-      !query ||
-      word.word.toLowerCase().includes(query) ||
-      word.chinese.toLowerCase().includes(query) ||
-      word.definition.toLowerCase().includes(query) ||
-      word.partOfSpeech.toLowerCase().includes(query);
-
-    if (!matchesQuery || !matchesRank) return false;
-    if (state.currentFilter === "favorites") return isFavorite;
-    if (state.currentFilter === "all") return true;
-    return status === state.currentFilter;
-  });
-
-  state.filteredWords =
-    state.reviewMode === "mistakes" ? sortWordsForMistakeMode(filtered) : filtered;
-
-  const savedWordId = state.progress.viewPositions[getViewKey()] || state.progress.lastWordId;
-  if (savedWordId) {
-    const savedIndex = state.filteredWords.findIndex((word) => word.id === savedWordId);
-    if (savedIndex >= 0) {
-      state.currentIndex = savedIndex;
-    } else {
-      state.currentIndex = 0;
-    }
-  } else if (state.currentIndex >= state.filteredWords.length) {
-    state.currentIndex = 0;
-  }
-
-  renderStats();
-  renderCard();
-}
-
-function renderStats() {
-  const mastered = words.filter((word) => getStatus(word.id) === "mastered").length;
-  const favorites = state.progress.favorites.length;
-  const progressPercent = Math.round((mastered / words.length) * 100);
-  const learningCount = words.filter((word) => getStatus(word.id) === "learning").length;
-  els.heroWordCount.textContent = `${words.length} 个核心词，随时开练`;
-  els.heroSubtitle.textContent =
-    state.filteredWords.length === words.length &&
-    state.currentRank === "all" &&
-    state.reviewMode === "normal"
-      ? "闪卡、测验、收藏和复习进度都会自动保存在本机。"
-      : state.reviewMode === "mistakes"
-        ? `错词优先模式已开启，当前有 ${learningCount} 个学习中单词。`
-        : `当前筛选结果 ${state.filteredWords.length} 个词。`;
-  els.progressLabel.textContent = `掌握进度 ${progressPercent}%`;
-  els.streakCount.textContent = `连续学习 ${state.progress.streak || 0} 天`;
-  els.progressBar.style.width = `${progressPercent}%`;
-  els.masteredCount.textContent = String(mastered);
-  els.todayCount.textContent = String(state.progress.todayDone || 0);
-  els.favoriteCount.textContent = String(favorites);
-  els.mistakeModeBtn.classList.toggle("active-toggle", state.reviewMode === "mistakes");
-  els.mistakeModeBtn.textContent =
-    state.reviewMode === "mistakes" ? "错词优先中" : "错词优先";
-}
-
-function renderCard() {
-  const word = getCurrentWord();
-  if (!word) {
-    els.studyOrder.textContent = "#0";
-    els.studyWord.textContent = "没有匹配结果";
-    els.studyPronunciation.textContent = "";
-    els.studyPronunciationBack.textContent = "";
-    els.studyPos.textContent = "";
-    els.studyChinese.textContent = "";
-    els.studyDefinition.textContent = "试试换个筛选条件或搜索关键词。";
-    els.studyExample.textContent = "";
-    els.studyExampleChinese.textContent = "";
-    els.favoriteBtn.textContent = "☆";
-    return;
-  }
-
-  state.progress.lastWordId = word.id;
-  persistViewState();
-
-  const favorite = state.progress.favorites.includes(word.id);
-  els.studyOrder.textContent = `#${word.id}`;
-  els.studyWord.textContent = word.word;
-  els.studyPronunciation.textContent = word.pronunciation || "";
-  els.studyPronunciationBack.textContent = word.pronunciation || "";
-  els.studyPos.textContent = word.partOfSpeech || "word";
-  els.studyHint.textContent =
-    getStatus(word.id) === "mastered" ? "已标记为记住了" : "点击查看释义和例句";
-  els.studyChinese.textContent = seemsMojibake(word.chinese) ? "" : word.chinese;
-  els.studyDefinition.textContent = word.definition || "No definition available.";
-  els.studyExample.textContent = word.example || "";
-  els.studyExampleChinese.textContent = seemsMojibake(word.exampleChinese)
-    ? ""
-    : word.exampleChinese;
-  els.favoriteBtn.textContent = favorite ? "★" : "☆";
-}
-
-function resetCardFace() {
-  els.card.classList.remove("is-flipped");
-}
-
-function stepCard(direction) {
-  if (!state.filteredWords.length) return;
-  state.currentIndex =
-    (state.currentIndex + direction + state.filteredWords.length) %
-    state.filteredWords.length;
-  resetCardFace();
-  renderCard();
-}
-
-function rateWord(nextStatus) {
-  const word = getCurrentWord();
-  if (!word) return;
-  const previousStatus = getStatus(word.id);
-  state.progress.status[word.id] = nextStatus;
-  rememberRecent(word.id);
-  registerStudyActivity();
-  if (previousStatus !== nextStatus) {
-    state.progress.todayDone = (state.progress.todayDone || 0) + 1;
-  }
-  saveProgress();
-  renderStats();
-  renderReviewLists();
-  stepCard(1);
-}
-
-function toggleFavorite(id) {
-  const favorites = new Set(state.progress.favorites);
-  if (favorites.has(id)) {
-    favorites.delete(id);
-  } else {
-    favorites.add(id);
-  }
-  state.progress.favorites = [...favorites];
-  rememberRecent(id);
-  registerStudyActivity();
-  saveProgress();
-  renderStats();
-  renderCard();
-  renderReviewLists();
-}
-
-function rememberRecent(id) {
-  const next = [id, ...state.progress.recent.filter((item) => item !== id)].slice(0, 20);
-  state.progress.recent = next;
-}
-
-function buildQuiz() {
-  const visibleWords = state.filteredWords.length ? state.filteredWords : words;
-  const cleanVisibleWords = visibleWords.filter((word) => !seemsMojibake(word.chinese));
-  const learningWords = cleanVisibleWords.filter((word) => getStatus(word.id) === "learning");
-  const quizPool =
-    state.reviewMode === "mistakes" && learningWords.length
-      ? learningWords
-      : cleanVisibleWords.length
-        ? cleanVisibleWords
-        : visibleWords;
-  const answer = quizPool[Math.floor(Math.random() * quizPool.length)] || words[0];
-  const distractors = shuffleArray(visibleWords.filter((word) => word.id !== answer.id))
-    .slice(0, 3)
-    .map((word) => word.word);
-  const options = shuffleArray([answer.word, ...distractors]);
-  state.quiz = { answerId: answer.id, options };
-
-  els.quizPrompt.textContent = answer.chinese || answer.definition || answer.word;
-  els.quizOptions.innerHTML = "";
-  els.quizFeedback.textContent = "";
-
-  options.forEach((option) => {
-    const button = document.createElement("button");
-    button.className = "quiz-option";
-    button.type = "button";
-    button.textContent = option;
-    button.addEventListener("click", () => handleQuizAnswer(button, option, answer));
-    els.quizOptions.appendChild(button);
-  });
-}
-
-function handleQuizAnswer(button, choice, answer) {
-  const buttons = [...els.quizOptions.querySelectorAll(".quiz-option")];
-  buttons.forEach((item) => (item.disabled = true));
-  const correct = choice === answer.word;
-  registerStudyActivity();
-  if (correct) {
-    button.classList.add("correct");
-    els.quizFeedback.textContent = `答对了：${answer.word}`;
-    state.progress.status[answer.id] = "mastered";
-  } else {
-    button.classList.add("wrong");
-    const target = buttons.find((item) => item.textContent === answer.word);
-    if (target) target.classList.add("correct");
-    els.quizFeedback.textContent = `正确答案是：${answer.word}`;
-    state.progress.status[answer.id] = "learning";
-  }
-  rememberRecent(answer.id);
-  state.progress.todayDone = (state.progress.todayDone || 0) + 1;
-  saveProgress();
-  renderStats();
-  renderReviewLists();
-}
-
-function registerStudyActivity() {
-  const today = new Date().toISOString().slice(0, 10);
-  const last = state.progress.lastStudyDate;
-  if (last === today) return;
-  if (!last) {
-    state.progress.streak = 1;
-  } else {
-    const diffDays = Math.round(
-      (new Date(`${today}T00:00:00Z`) - new Date(`${last}T00:00:00Z`)) / 86400000
-    );
-    state.progress.streak = diffDays === 1 ? (state.progress.streak || 0) + 1 : 1;
-  }
-  state.progress.lastStudyDate = today;
-}
-
-function renderReviewLists() {
-  renderWordList(
-    els.favoritesList,
-    state.progress.favorites.map(findWordById),
-    "还没有收藏单词"
-  );
-  renderWordList(
-    els.recentList,
-    state.progress.recent.map(findWordById),
-    "最近还没有学习记录"
-  );
-}
-
-function renderWordList(container, entries, emptyText) {
-  container.innerHTML = "";
-  const validEntries = entries.filter(Boolean).slice(0, 12);
-  if (!validEntries.length) {
-    const empty = document.createElement("p");
-    empty.className = "muted";
-    empty.textContent = emptyText;
-    container.appendChild(empty);
-    return;
-  }
-
-  validEntries.forEach((word) => {
-    const item = document.createElement("button");
-    item.className = "word-item";
-    item.type = "button";
-    item.addEventListener("click", () => {
-      switchPanel("study");
-      const index = state.filteredWords.findIndex((entry) => entry.id === word.id);
-      if (index >= 0) {
-        state.currentIndex = index;
-      } else {
-        state.currentFilter = "all";
-        [...els.filterChips.querySelectorAll(".chip")].forEach((chip) => {
-          chip.classList.toggle("active", chip.dataset.filter === "all");
-        });
-        applyFilters();
-        state.currentIndex = state.filteredWords.findIndex((entry) => entry.id === word.id);
-      }
-      resetCardFace();
-      renderCard();
+    registration.addEventListener("updatefound", () => {
+      const worker = registration.installing;
+      if (!worker) return;
+      worker.addEventListener("statechange", () => {
+        if (worker.state === "installed" && navigator.serviceWorker.controller) {
+          worker.postMessage("SKIP_WAITING");
+        }
+      });
     });
-
-    const left = document.createElement("div");
-    left.className = "word-item-main";
-    const title = document.createElement("strong");
-    title.textContent = word.word;
-    const pronunciation = document.createElement("p");
-    pronunciation.className = "word-pronunciation";
-    pronunciation.textContent = word.pronunciation || "";
-    const meta = document.createElement("p");
-    meta.className = "word-meta";
-    meta.textContent = `${word.partOfSpeech || "word"} | ${statusLabel(getStatus(word.id))}`;
-    left.append(title, pronunciation, meta);
-
-    const right = document.createElement("div");
-    right.className = "word-item-side";
-
-    const chinese = document.createElement("span");
-    chinese.className = "word-item-cn";
-    chinese.textContent = seemsMojibake(word.chinese) ? "" : word.chinese;
-
-    const definition = document.createElement("span");
-    definition.className = "word-item-definition";
-    definition.textContent = word.definition || "";
-
-    right.append(chinese, definition);
-    item.append(left, right);
-    container.appendChild(item);
-  });
+  }).catch(() => {});
 }
 
-function statusLabel(status) {
-  if (status === "mastered") return "已掌握";
-  if (status === "learning") return "学习中";
-  return "未学";
-}
-
-function switchPanel(name) {
-  els.tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.target === name));
-  els.panels.forEach((panel) =>
-    panel.classList.toggle("active", panel.dataset.panel === name)
-  );
-  state.progress.lastPanel = name;
-  saveProgress();
-}
-
-function toggleMistakeMode() {
-  state.reviewMode = state.reviewMode === "mistakes" ? "normal" : "mistakes";
-  state.currentIndex = 0;
-  resetCardFace();
-  applyFilters();
-  buildQuiz();
-  persistViewState();
-}
-
-function sortWordsForMistakeMode(entries) {
-  const priority = {
-    learning: 0,
-    unseen: 1,
-    mastered: 2,
-  };
-  return [...entries].sort((a, b) => {
-    const diff = priority[getStatus(a.id)] - priority[getStatus(b.id)];
-    if (diff !== 0) return diff;
-    return a.id - b.id;
-  });
-}
-
-function inRankRange(id, range) {
-  if (range === "all") return true;
-  const [start, end] = range.split("-").map(Number);
-  return id >= start && id <= end;
-}
-
-function findWordById(id) {
-  return words.find((word) => word.id === id);
-}
-
-function speakCurrentWord() {
-  const word = getCurrentWord();
-  if (!word || !window.speechSynthesis) return;
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(word.word);
-  applyPreferredVoice(utterance, "en-GB");
-  utterance.rate = 0.9;
-  window.speechSynthesis.speak(utterance);
-}
-
-function speakCurrentExample() {
-  const word = getCurrentWord();
-  if (!word || !word.example || !window.speechSynthesis) return;
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(word.example);
-  applyPreferredVoice(utterance, "en-GB");
-  utterance.rate = 0.95;
-  window.speechSynthesis.speak(utterance);
-}
-
-function applyPreferredVoice(utterance, lang) {
-  utterance.lang = lang;
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices.length) return;
-
-  const normalizedLang = lang.toLowerCase();
-  const sameLangVoices = voices.filter((voice) =>
-    voice.lang && voice.lang.toLowerCase().startsWith(normalizedLang.slice(0, 2))
-  );
-  const pool = sameLangVoices.length ? sameLangVoices : voices;
-
-  const femaleHints = [
-    "female",
-    "woman",
-    "samantha",
-    "victoria",
-    "karen",
-    "serena",
-    "moira",
-    "tessa",
-    "ava",
-    "allison",
-    "susan",
-    "fiona",
-    "rishi",
-    "zira"
-  ];
-
-  const preferred =
-    pool.find((voice) =>
-      femaleHints.some((hint) => voice.name.toLowerCase().includes(hint))
-    ) ||
-    pool.find((voice) => /en-gb/i.test(voice.lang) && /samantha|serena|kate|fiona/i.test(voice.name)) ||
-    pool.find((voice) => /en-us/i.test(voice.lang) && /ava|allison|samantha|victoria|zira/i.test(voice.name)) ||
-    pool[0];
-
-  if (preferred) {
-    utterance.voice = preferred;
-    utterance.lang = preferred.lang || lang;
-  }
-}
-
-if ("speechSynthesis" in window) {
-  window.speechSynthesis.getVoices();
-  window.speechSynthesis.onvoiceschanged = () => {
-    window.speechSynthesis.getVoices();
-  };
-}
-
-function resetProgress() {
-  const confirmed = window.confirm("确定要清空收藏和学习进度吗？");
-  if (!confirmed) return;
-  localStorage.removeItem(STORAGE_KEY);
-  state.progress = loadProgress();
-  state.currentFilter = "all";
-  state.currentRank = "all";
-  state.reviewMode = "normal";
-  state.query = "";
-  els.searchInput.value = "";
-  [...els.filterChips.querySelectorAll(".chip")].forEach((chip) => {
-    chip.classList.toggle("active", chip.dataset.filter === "all");
-  });
-  [...els.rankChips.querySelectorAll(".chip")].forEach((chip) => {
-    chip.classList.toggle("active", chip.dataset.rank === "all");
-  });
-  switchPanel("study");
-  applyFilters();
-  renderReviewLists();
-  buildQuiz();
-}
-
-function shuffleArray(input) {
-  const array = [...input];
-  for (let i = array.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
+function shuffle(list) {
+  const array = [...list];
+  for (let index = array.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1));
+    [array[index], array[swap]] = [array[swap], array[index]];
   }
   return array;
 }
 
-function registerServiceWorker() {
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
-  }
+function hash(text) {
+  let value = 0;
+  for (const char of text) value = (value * 33 + char.charCodeAt(0)) >>> 0;
+  return value;
 }

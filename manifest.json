@@ -1,10 +1,12 @@
 {
   "name": "NGSL常用词学习",
   "short_name": "NGSL词汇",
+  "description": "用闪卡、测验和 FSRS 间隔复习学习 NGSL 1.2 核心词。",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#07111f",
-  "theme_color": "#07111f",
+  "background_color": "#f6f1e7",
+  "theme_color": "#f6f1e7",
+  "lang": "zh-CN",
   "icons": [
     {
       "src": "./icon-192.png",
